@@ -6,6 +6,11 @@ use anchor_lang::{
     solana_program::{clock::Clock, hash::hash, program::invoke, system_instruction::transfer},
 };
 
+use anchor_spl::{
+    associated_token::AssociatedToken,
+    token::{self,Mint, MintTo,Burn, Token, TokenAccount,Transfer as SplTransfer},   
+};
+
 use crate::{constants::*, error::LotteryError};
 
 declare_id!("6ANiwC3FdEnXz9UgTX9haDmVuSxE4GxfRQ6DEke29exR");
@@ -36,6 +41,84 @@ mod lottery {
         Ok(())
     }
 
+    pub fn buy_ticket_with_token(ctx: Context<BuyTicketWithToken>, lottery_id: u32) -> Result<()> {
+        let lottery = &mut ctx.accounts.lottery;
+        let ticket = &mut ctx.accounts.ticket;
+        let buyer = &ctx.accounts.buyer;
+
+        if lottery.winner_id.is_some() {
+            return err!(LotteryError::WinnerAlreadyExists);
+        }
+
+        // Transfer TOKEN to Lottery PDA
+        // 
+        // invoke(
+        //     &transfer(&buyer.key(), &lottery.key(), lottery.ticket_price),
+        //     &[
+        //         buyer.to_account_info(),
+        //         lottery.to_account_info(),
+        //         ctx.accounts.system_program.to_account_info(),
+        //     ],
+        // )?;
+          // transfer X token from sender -> PDA vault 
+          let transfer_ctx = CpiContext::new(
+            ctx.accounts.token_program.to_account_info(), 
+            SplTransfer {
+                from: ctx.accounts.buyer_token_account.to_account_info().clone(), 
+                to: ctx.accounts.lottery_token_account.to_account_info().clone(),
+                authority: ctx.accounts.buyer.to_account_info().clone(), 
+            }
+        );
+        token::transfer(transfer_ctx,  lottery.ticket_price)?;
+
+
+        lottery.last_ticket_id += 1;
+
+        ticket.id = lottery.last_ticket_id;
+        ticket.lottery_id = lottery_id;
+        ticket.authority = buyer.key();
+
+        msg!("Ticket id: {}", ticket.id);
+        msg!("Ticket authority: {}", ticket.authority);
+
+        Ok(())
+    }
+
+    // TODO
+    pub fn createStaker(ctx: Context<DepositStaking>, lottery_id: u32) -> Result<()> {
+        //https://book.anchor-lang.com/anchor_in_depth/CPIs.html
+        let cpi_program = ctx.accounts.staking.to_account_info();
+        // create vault pda
+        let cpi_accounts = new_staker {
+            puppet: ctx.accounts.puppet.to_account_info(),
+        };
+        let cpi_ctx = CpiContext::new(cpi_program, cpi_accounts);
+        puppet::cpi::set_data(cpi_ctx, data)
+
+    }
+
+    pub fn depositToStaking(ctx: Context<DepositStaking>, lottery_id: u32) -> Result<()> {
+        //https://book.anchor-lang.com/anchor_in_depth/CPIs.html
+        let cpi_program = ctx.accounts.staking.to_account_info();
+        // create vault pda
+        let cpi_accounts = new_staker {
+            puppet: ctx.accounts.puppet.to_account_info(),
+        };
+        let cpi_ctx = CpiContext::new(cpi_program, cpi_accounts);
+        puppet::cpi::set_data(cpi_ctx, data)
+
+    }
+
+    // pub fn removeFromStaking(ctx: Context<DepositStaking>, lottery_id: u32) -> Result<()> {
+    // }
+
+    // pub fn claimPrizeInToken(ctx: Context<DepositStaking>, lottery_id: u32) -> Result<()> {
+    // }
+
+    // pub fn refundTicket(ctx: Context<DepositStaking>, lottery_id: u32) -> Result<()> {
+    // }
+
+    // fin TODO
     pub fn buy_ticket(ctx: Context<BuyTicket>, lottery_id: u32) -> Result<()> {
         let lottery = &mut ctx.accounts.lottery;
         let ticket = &mut ctx.accounts.ticket;
@@ -75,6 +158,7 @@ mod lottery {
         }
         if lottery.last_ticket_id == 0 {
             return err!(LotteryError::NoTickets);
+
         }
 
         // Pick a pseudo-random winner
@@ -184,6 +268,38 @@ pub struct Lottery {
     pub last_ticket_id: u32,
     pub winner_id: Option<u32>,
     pub claimed: bool,
+}
+
+#[derive(Accounts)]
+#[instruction(lottery_id: u32)]
+pub struct BuyTicketWithToken<'info> {
+    #[account(
+        mut,
+        seeds = [LOTTERY_SEED.as_bytes(), &lottery_id.to_le_bytes()],
+        bump,
+    )]
+    pub lottery: Account<'info, Lottery>,
+    #[account(
+        init,
+        payer = buyer,
+        space = 8 + 4 + 4 + 32,
+        seeds = [
+            TICKET_SEED.as_bytes(),
+            lottery.key().as_ref(),
+            &(lottery.last_ticket_id + 1).to_le_bytes()
+        ],
+        bump,
+    )]
+    pub ticket: Account<'info, Ticket>,
+
+    pub lottery_token_account: Account<'info, TokenAccount>,//pda 
+    pub buyer_token_account: Account<'info, TokenAccount>,//pda
+    pub token: Account<'info, Mint>,// token
+
+    #[account(mut)]
+    pub buyer: Signer<'info>,
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
