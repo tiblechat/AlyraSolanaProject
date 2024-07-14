@@ -1,8 +1,6 @@
-# AlyraSolanaProject
+# Alyra Solana Project
 
 ## Development
-
-### Frontend
 
 ```shell
 pnpm run dev
